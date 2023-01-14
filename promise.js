@@ -1,5 +1,3 @@
-const process = require('node:process');
-
 class MyPromise {
     // state of MyPromise: pending, fulfilled or rejected
     #state;
@@ -46,7 +44,7 @@ class MyPromise {
     #fulfill(value) {
         this.#state = 'fulfilled';
         this.#value = value;
-        this.#onFullfilledHandlers.forEach((fn) => process.nextTick(fn));
+        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
         this.#onFullfilledHandlers = null;
     }
 
@@ -60,7 +58,7 @@ class MyPromise {
     #reject(error, isCalled = false) {
         this.#state = 'rejected';
         this.#value = error;
-        this.#onRejectedHandlers.forEach((fn) => process.nextTick(fn));
+        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
         this.#onRejectedHandlers = null;
         this.#isCalled = isCalled;
     }
@@ -78,6 +76,8 @@ class MyPromise {
     }
 
     /**
+     * If the passed argument is a function, it is called asynchronously when `MyPromise` is resolved.
+     * 
      * Subscribe to given `MyPromise`
      * and register 2 callbacks:
      * `onFulfilled` and `onRejected`
@@ -109,7 +109,7 @@ class MyPromise {
                 this.#onFullfilledHandlers.push(() => {     
                     try {
                         const fulfilled = onFulfilled(this.#value);
-                        
+                    
                         // check if callback returned MyPromise (like p.then((res) => new MyPromise(...)))
                         if (fulfilled instanceof MyPromise) {
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
@@ -119,6 +119,7 @@ class MyPromise {
 
                             p.then((result) => {return new MyPromise((res, rej) => setTimeout(() => res(result), 1000))})
                             */
+                          
                             fulfilled.then(resolve, reject);
                         } else {
                             resolve(fulfilled);
@@ -154,8 +155,9 @@ class MyPromise {
             }
 
             if (this.#state === "fulfilled") {
-                // execute promise callback if promise already fulfilled
+               setTimeout(() => {
                 try {
+                    // execute promise callback if promise already fulfilled
                     const fulfilled = onFulfilled(this.#value);
                     // check if callback returned MyPromise 
                     if (fulfilled instanceof MyPromise) {
@@ -167,28 +169,30 @@ class MyPromise {
                 } catch (error) {
                     reject(error);
                 }
-                              
+               }, 0)                
             }
 
             if (this.#state === "rejected") {
-                try {
-                    if (typeof onRejected !== 'function') {
-                        reject(this.#value);
-                        
-                        return;
-                    } 
-                    // execute promise callback if promise already rejected
-                    const rejected = onRejected(this.#value);
-                    // check if callback returned MyPromise 
-                    if (rejected instanceof MyPromise) {
-                        // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                        rejected.then(resolve, reject);
-                    } else {
-                        reject(rejected, true);
-                    } 
-                } catch (error) {
-                    reject(error);
-                }    
+                setTimeout(() => {
+                    try {
+                        if (typeof onRejected !== 'function') {
+                            reject(this.#value);
+                            
+                            return;
+                        } 
+                        // execute promise callback if promise already rejected
+                        const rejected = onRejected(this.#value);
+                        // check if callback returned MyPromise 
+                        if (rejected instanceof MyPromise) {
+                            // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                            rejected.then(resolve, reject);
+                        } else {
+                            reject(rejected, true);
+                        } 
+                    } catch (error) {
+                        reject(error);
+                    }    
+                }, 0)
             }    
         })
     }
