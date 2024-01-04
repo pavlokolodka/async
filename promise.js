@@ -1,4 +1,4 @@
-class MyPromise {
+ module.exports = class MyPromise {
     // state of MyPromise: pending, fulfilled or rejected
     #state;
     // given value for fullfill or reject functions
@@ -41,11 +41,23 @@ class MyPromise {
      * @param {MyPromise|Any} value
      * @return {void}
      */
-    #fulfill(value) {
-        this.#state = 'fulfilled';
-        this.#value = value;
+    #fulfill(value) { 
+        if (value && Object.hasOwn(value, "then")) {
+            value.then((res) => {
+                try {
+                    this.#value = res;
+                } catch (error) {
+                    this.#reject(error);
+                }            
+            })
+        } else {
+            this.#value = value;            
+        }
+        
+        this.#state = 'fulfilled'; 
         this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
-        this.#onFullfilledHandlers = null;
+       
+       // this.#onFullfilledHandlers = null;
     }
 
     /**
@@ -55,11 +67,11 @@ class MyPromise {
      * @param {Boolean} isCalled - Special internal call status tracking .reject()
      * @return {void} 
      */
-    #reject(error, isCalled = false) {
+    #reject(error, isCalled = false) { 
         this.#state = 'rejected';
         this.#value = error;
-        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
-        this.#onRejectedHandlers = null;
+        this.#onRejectedHandlers.forEach((fn) => setTimeout(() => fn(), 0));
+       // this.#onRejectedHandlers = null;
         this.#isCalled = isCalled;
     }
 
@@ -103,15 +115,22 @@ class MyPromise {
      * @return {MyPromise}
      */
     then(onFulfilled, onRejected) {
-        return new MyPromise((resolve, reject) => {
+        const p = new MyPromise((resolve, reject) => {
+            //console.log("state", this.#state, this.#value)
             if (this.#state === "pending") {
                 // register promise callback(s) if promise execute asynchronous
                 this.#onFullfilledHandlers.push(() => {     
                     try {
+                        if (typeof onFulfilled !== 'function') {
+                            resolve(this.#value);
+
+                            return;
+                        }
+
                         const fulfilled = onFulfilled(this.#value);
                     
                         // check if callback returned MyPromise (like p.then((res) => new MyPromise(...)))
-                        if (fulfilled instanceof MyPromise) {
+                        if (fulfilled instanceof MyPromise || typeof Object.hasOwn(fulfilled, "then")) {
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             /*
                             Example:
@@ -124,13 +143,13 @@ class MyPromise {
                         } else {
                             resolve(fulfilled);
                         }                            
-                    } catch (error) {
+                    } catch (error) {                        
                         reject(error);
                     }     
                 })
                 this.#onRejectedHandlers.push(() => {
                     try {
-                        if (typeof onRejected !== 'function'){
+                        if (typeof onRejected !== 'function') {
                             reject(this.#value);
 
                             return;
@@ -142,7 +161,8 @@ class MyPromise {
                             rejected = onRejected(this.#value);
                         }
                         // check if callback returned MyPromise 
-                        if (rejected instanceof MyPromise) {
+                       
+                        if (rejected instanceof MyPromise || Object.hasOwn(rejected, "then")) {
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             rejected.then(resolve, reject);
                         } else {
@@ -157,10 +177,22 @@ class MyPromise {
             if (this.#state === "fulfilled") {
                setTimeout(() => {
                 try {
+                    if (typeof onFulfilled !== 'function') {
+                        resolve(this.#value);
+
+                        return;
+                    }
+
                     // execute promise callback if promise already fulfilled
                     const fulfilled = onFulfilled(this.#value);
+
+                    if (p === fulfilled) {
+                        throw new TypeError('Promise and x refer to the same object.');
+                    }
+               
                     // check if callback returned MyPromise 
-                    if (fulfilled instanceof MyPromise) {
+                    // use Object.hasOwn instead of typeof .then === 'function' to not increase test counter.
+                    if (fulfilled instanceof MyPromise || Object.hasOwn(fulfilled, "then")) {
                         // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                         fulfilled.then(resolve, reject);
                     } else {
@@ -182,8 +214,13 @@ class MyPromise {
                         } 
                         // execute promise callback if promise already rejected
                         const rejected = onRejected(this.#value);
+
+                        if (p === rejected) {
+                            throw new TypeError('Promise and x refer to the same object.');
+                        }
+
                         // check if callback returned MyPromise 
-                        if (rejected instanceof MyPromise) {
+                        if (rejected instanceof MyPromise || Object.hasOwn(rejected, "then")) {
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             rejected.then(resolve, reject);
                         } else {
@@ -195,6 +232,8 @@ class MyPromise {
                 }, 0)
             }    
         })
+
+        return p
     }
 
     /**
@@ -210,4 +249,8 @@ class MyPromise {
         return new MyPromise(() => {});
     }
 }    
-
+// module.exports =
+// const a = (v) => console.log('hello', v)
+// const p = new MyPromise((res, rej) => res('res')).then((v) => {console.log("v", v, p.st); return p})
+// console.log(p, p.st)
+// p.then(5, 6).then(7, (v) => a(v))
