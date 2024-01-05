@@ -7,7 +7,7 @@
     #onFullfilledHandlers;
     // array for rejected handler functions
     #onRejectedHandlers;
-    // reserved field for internal tracking
+    // reserved field for internal tracking of the MyPromise resolution
     #isCalled;
     /**
    * @param {Function} func - Handler function with 2 prepared callbacks: `resolve` and `reject`  
@@ -19,7 +19,7 @@
    * 
    * const promise = new MyPromise((resolve, reject) => {
    *    setTimeout(() => resolve('resolved!'), 1000);
-   *    // setTimeout(() => reject('rejected'), 1000);
+   *    // setTimeout(() => reject('rejected!'), 1000);
    * })
    * @return {MyPromise}
    */
@@ -41,20 +41,27 @@
      * @param {MyPromise|Any} value
      * @return {void}
      */
-    #fulfill(value) { 
-        if (value && Object.hasOwn(value, "then")) {
-            value.then((res) => {
-                try {
-                    this.#value = res;
-                } catch (error) {
-                    this.#reject(error);
-                }            
-            })
+    #fulfill(value) {  
+        if (this.#isCalled) return;
+
+        if (value && (typeof value === 'object' && "then" in value || typeof value === 'function' && "then" in value)) { 
+            try {
+                value.then(this.#fulfill.bind(this), this.#reject.bind(this))
+                return;
+            } catch (error) {
+                this.#reject(error);
+                return;
+            }          
         } else {
             this.#value = value;            
         }
         
         this.#state = 'fulfilled'; 
+        this.#isCalled = true;
+        // setTimeout(() => {
+        //     this.#onFullfilledHandlers.forEach((fn) => fn());
+        // }, 0);
+        
         this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
        
        // this.#onFullfilledHandlers = null;
@@ -64,15 +71,33 @@
      * Reject with passed error 
      *
      * @param {MyPromise|Any} error
-     * @param {Boolean} isCalled - Special internal call status tracking .reject()
+     * @param {Boolean} isThrown - Special internal call status tracking when a onFulfilled/onRejected throws a thenable (See then method 7.2)
      * @return {void} 
      */
-    #reject(error, isCalled = false) { 
+    #reject(error, isThrown = false) {  
+        if (this.#isCalled) return;
+
+        if (!isThrown && error && (typeof error === 'object' && "then" in error || typeof error === 'function' && "then" in error)) { 
+            try {
+                error.then(this.#fulfill.bind(this), this.#reject.bind(this))
+                return;
+            } catch (err) {
+                this.#reject(err);
+                return;
+            } 
+        } else {
+            this.#value = error;
+        }
+
         this.#state = 'rejected';
-        this.#value = error;
-        this.#onRejectedHandlers.forEach((fn) => setTimeout(() => fn(), 0));
+      
+        // setTimeout(() => {
+        //     this.#onRejectedHandlers.forEach((fn) => fn());            
+        // }, 0);
+      
+       this.#onRejectedHandlers.forEach((fn) => setTimeout(() => fn(), 0));
+        this.#isCalled = true;
        // this.#onRejectedHandlers = null;
-        this.#isCalled = isCalled;
     }
 
     /**
@@ -114,9 +139,8 @@
      * @param {Function | Any} onRejected
      * @return {MyPromise}
      */
-    then(onFulfilled, onRejected) {
-        const p = new MyPromise((resolve, reject) => {
-            //console.log("state", this.#state, this.#value)
+    then(onFulfilled, onRejected) {     
+        const p = new MyPromise((resolve, reject) => {         
             if (this.#state === "pending") {
                 // register promise callback(s) if promise execute asynchronous
                 this.#onFullfilledHandlers.push(() => {     
@@ -128,9 +152,10 @@
                         }
 
                         const fulfilled = onFulfilled(this.#value);
-                    
+                       
+
                         // check if callback returned MyPromise (like p.then((res) => new MyPromise(...)))
-                        if (fulfilled instanceof MyPromise || typeof Object.hasOwn(fulfilled, "then")) {
+                        if (fulfilled && (typeof fulfilled === 'object' && "then" in fulfilled || typeof fulfilled === 'function' && "then" in fulfilled)) { 
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             /*
                             Example:
@@ -144,10 +169,10 @@
                             resolve(fulfilled);
                         }                            
                     } catch (error) {                        
-                        reject(error);
+                        reject(error, true);
                     }     
                 })
-                this.#onRejectedHandlers.push(() => {
+                this.#onRejectedHandlers.push(() => {  
                     try {
                         if (typeof onRejected !== 'function') {
                             reject(this.#value);
@@ -155,26 +180,27 @@
                             return;
                         } 
 
-                        let rejected;
+                        const rejected = onRejected(this.#value);
 
-                        if (!this.#isCalled) {
-                            rejected = onRejected(this.#value);
-                        }
+                        // if (!this.#isCalled) {
+                        //     rejected = onRejected(this.#value);
+                        // } Test this with .catch()
+
                         // check if callback returned MyPromise 
                        
-                        if (rejected instanceof MyPromise || Object.hasOwn(rejected, "then")) {
+                        if (rejected && (typeof rejected === 'object' && "then" in rejected || typeof rejected === 'function' && "then" in rejected)) { 
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             rejected.then(resolve, reject);
                         } else {
-                            reject(rejected, true);
+                            resolve(rejected, true);
                         }                           
                     } catch (error) {
-                        reject(error);
+                        reject(error, true);
                     }
                 })
             }
 
-            if (this.#state === "fulfilled") {
+            if (this.#state === "fulfilled") { 
                setTimeout(() => {
                 try {
                     if (typeof onFulfilled !== 'function') {
@@ -191,20 +217,20 @@
                     }
                
                     // check if callback returned MyPromise 
-                    // use Object.hasOwn instead of typeof .then === 'function' to not increase test counter.
-                    if (fulfilled instanceof MyPromise || Object.hasOwn(fulfilled, "then")) {
-                        // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                    // use "in" instead of typeof fulfilled.then === 'function' to not increase an internal test counter.                  
+                   if (fulfilled && (typeof fulfilled === 'object' && "then" in fulfilled || typeof fulfilled === 'function' && "then" in fulfilled)) { 
+                    // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                         fulfilled.then(resolve, reject);
                     } else {
                         resolve(fulfilled)
                     }   
                 } catch (error) {
-                    reject(error);
+                    reject(error, true);
                 }
                }, 0)                
             }
 
-            if (this.#state === "rejected") {
+            if (this.#state === "rejected") { 
                 setTimeout(() => {
                     try {
                         if (typeof onRejected !== 'function') {
@@ -220,20 +246,20 @@
                         }
 
                         // check if callback returned MyPromise 
-                        if (rejected instanceof MyPromise || Object.hasOwn(rejected, "then")) {
+                        if (rejected && (typeof rejected === 'object' && "then" in rejected || typeof rejected === 'function' && "then" in rejected)) { 
                             // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
                             rejected.then(resolve, reject);
                         } else {
-                            reject(rejected, true);
+                            resolve(rejected);
                         } 
                     } catch (error) {
-                        reject(error);
+                        reject(error, true);
                     }    
                 }, 0)
             }    
         })
 
-        return p
+        return p;
     }
 
     /**
@@ -249,8 +275,3 @@
         return new MyPromise(() => {});
     }
 }    
-// module.exports =
-// const a = (v) => console.log('hello', v)
-// const p = new MyPromise((res, rej) => res('res')).then((v) => {console.log("v", v, p.st); return p})
-// console.log(p, p.st)
-// p.then(5, 6).then(7, (v) => a(v))
