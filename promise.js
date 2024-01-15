@@ -9,6 +9,7 @@ module.exports = class MyPromise {
     #onRejectedHandlers;
     // reserved field for internal tracking of the MyPromise resolution
     #isCalled;
+    #isBusy;
     /**
    * @param {Function} func - Handler function with 2 prepared callbacks: `resolve` and `reject`  
    * `resolve`- resolved with given value
@@ -28,6 +29,7 @@ module.exports = class MyPromise {
         this.#onFullfilledHandlers = [];
         this.#onRejectedHandlers = [];
         this.#isCalled = false;
+        this.#isBusy = false;
         
         try {
             this.#resolve(func, this.#fulfill.bind(this), this.#reject.bind(this));    
@@ -35,39 +37,97 @@ module.exports = class MyPromise {
             this.#reject(error);
         }
     }
+
+    #resolver(x) {
+        return new MyPromise((resolve, reject) => {
+            if (x && (typeof x === 'object' || typeof x === 'function')) { 
+                try { 
+                    let then;
+    
+                    if (typeof (then = x.then) === 'function') {
+                        // this.#isCalled = true; 
+                       //console.log(this.#isBusy)
+                        // if (this.#isBusy) return;
+    
+                        //this.#isBusy = true;
+                        // console.log('resolver calls bind.then')
+                        
+                        then.bind(x)((y) => {
+                            // console.log('bind value', y);
+                            const resolvedValue = this.#resolver.call(this, y);
+                            resolve(resolvedValue);
+                        }, (r) => {
+                           reject(r);                            
+                        });
+    
+                    //    console.log('value after bind.then')
+                        // return this.#resolver.call(this, resolved);
+                    } else {
+                        resolve(x);
+                    }              
+                } catch (error) { //console.log("#fulfill throws error")
+                    reject(error);
+                    return;
+                }          
+            } else {
+                resolve(x);
+            }
+        })
+       
+    }
+
      /**
      * Fulfill with passed value 
      *
      * @param {MyPromise|Any} value
      * @return {void}
      */
-    #fulfill(value) {  
-        if (this.#isCalled) return;
+    #fulfill(value) { 
+        if (this.#isCalled) return;        
+
+        if (this === value) {
+            this.#reject(new TypeError('Promise and x refer to the same object.'))
+            return;
+        }
 
         if (value && (typeof value === 'object' || typeof value === 'function')) { 
+            let isBusy = false; 
             try { 
+               
                 let then;
 
-                if (typeof (then = value.then) === 'function') {
-                    then.bind(value)(this.#fulfill.bind(this), this.#reject.bind(this))
+                if (typeof (then = value.then) === 'function') {     
+                    then.bind(value)((x) => { 
+                        if (isBusy) return;
+                        isBusy = true;
+
+                        this.#fulfill.call(this, x);
+                    }, (r) => {
+                        if (isBusy) return;
+                        isBusy = true;
+
+                        this.#reject.call(this, r)
+                    }                    
+                    );
+                  
                     return;
-                }                 
+                }              
             } catch (error) {
+                if (isBusy) return;
                 this.#reject(error);
                 return;
             }          
         } 
       
+
         this.#value = value;   
         this.#state = 'fulfilled'; 
         this.#isCalled = true;
         // setTimeout(() => {
         //     this.#onFullfilledHandlers.forEach((fn) => fn());
         // }, 0);
-        
-        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));
-       
-       // this.#onFullfilledHandlers = null;
+       // console.log('start calbacks')
+        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));       
     }
 
     /**
@@ -77,28 +137,28 @@ module.exports = class MyPromise {
      * @param {Boolean} isThrown - Special internal call status tracking when a onFulfilled/onRejected throws a thenable (See then method 2.2.7.2)
      * @return {void} 
      */
-    #reject(error, isThrown = false) {  
+    #reject(error, isThrown = false) {   //console.log('reject', error, this.#isCalled);
         if (this.#isCalled) return;
 
-        if (!isThrown && error && (typeof error === 'object'  || typeof error === 'function')) { 
-            try {
-                let then;
+        // if (!isThrown && error && (typeof error === 'object'  || typeof error === 'function')) { 
+        //     try {
+        //         let then;
 
-                if (typeof (then = error.then) === 'function') {
-                    then.bind(error)(this.#fulfill.bind(this), this.#reject.bind(this))
-                    return;
-                }            
+        //         if (typeof (then = error.then) === 'function') {
+        //             then.bind(error)(this.#fulfill.bind(this), this.#reject.bind(this))
+        //             return;
+        //         }            
                 
-            } catch (err) {
-                this.#reject(err);
-                return;
-            } 
-        } 
+        //     } catch (err) {
+        //         this.#reject(err);
+        //         return;
+        //     } 
+        // } 
 
         this.#value = error;   
         this.#state = 'rejected';
         this.#isCalled = true;
-      
+        //console.log('reject value', this.#value);
         // setTimeout(() => {
         //     this.#onRejectedHandlers.forEach((fn) => fn());            
         // }, 0);
@@ -148,10 +208,10 @@ module.exports = class MyPromise {
      * @return {MyPromise}
      */
     then(onFulfilled, onRejected) {     
-        const p = new MyPromise((resolve, reject) => {         
+        const p = new MyPromise((resolve, reject) => {      
             if (this.#state === "pending") {
                 // register promise callback(s) if promise execute asynchronous
-                this.#onFullfilledHandlers.push(() => {     
+                this.#onFullfilledHandlers.push(() => {     //console.log('push');
                     try {
                         if (typeof onFulfilled !== 'function') {
                             resolve(this.#value);
@@ -163,26 +223,27 @@ module.exports = class MyPromise {
                        
 
                         // check if callback returned MyPromise (like p.then((res) => new MyPromise(...)))
-                        if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
-                            // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                            /*
-                            Example:
-                            returned internal result of MyPromise back to .then() method to support future chaining
+                        // if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
+                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                        //     /*
+                        //     Example:
+                        //     returned internal result of MyPromise back to .then() method to support future chaining
 
-                            p.then((result) => {return new MyPromise((res, rej) => setTimeout(() => res(result), 1000))})
-                            */
+                        //     p.then((result) => {return new MyPromise((res, rej) => setTimeout(() => res(result), 1000))})
+                        //     */
                           
-                            let then;
-                        // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                        if (typeof (then = fulfilled.then) === 'function') {                                      
+                        //     let then;
+                        // // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
+                        // if (typeof (then = fulfilled.then) === 'function') {                                      
 
-                            then.bind(fulfilled)(resolve, reject);
-                        } else {
-                            resolve(fulfilled);
-                        }
-                        } else {
-                            resolve(fulfilled);
-                        }                            
+                        //     then.bind(fulfilled)(resolve, reject);
+                        // } else {
+                        //     resolve(fulfilled);
+                        // }
+                        // } else {
+                        //     resolve(fulfilled);
+                        // }  
+                        resolve(fulfilled);                          
                     } catch (error) {                        
                         reject(error, true);
                     }     
@@ -203,26 +264,27 @@ module.exports = class MyPromise {
 
                         // check if callback returned MyPromise 
                        
-                        if (rejected && (typeof rejected === 'object'  || typeof rejected === 'function')) { 
-                            // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                            let then;
-                            // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                            if (typeof (then = rejected.then) === 'function') {                                      
+                        // if (rejected && (typeof rejected === 'object'  || typeof rejected === 'function')) { 
+                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                        //     let then;
+                        //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
+                        //     if (typeof (then = rejected.then) === 'function') {                                      
     
-                                then.bind(rejected)(resolve, reject);
-                            } else {
-                                resolve(rejected);
-                            }
-                        } else {
-                            resolve(rejected, true);
-                        }                           
+                        //         then.bind(rejected)(resolve, reject);
+                        //     } else {
+                        //         resolve(rejected);
+                        //     }
+                        // } else {
+                        //     resolve(rejected, true);
+                        // }        
+                        resolve(rejected);                   
                     } catch (error) {
                         reject(error, true);
                     }
                 })
             }
 
-            if (this.#state === "fulfilled") { 
+            if (this.#state === "fulfilled") {  
                setTimeout(() => {
                 try {
                     if (typeof onFulfilled !== 'function') {
@@ -233,25 +295,25 @@ module.exports = class MyPromise {
 
                     // execute promise callback if promise already fulfilled
                     const fulfilled = onFulfilled(this.#value);
-
+                   
                     if (p === fulfilled) {
                         throw new TypeError('Promise and x refer to the same object.');
                     }
                
                     // check if callback returned MyPromise 
-                    if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
-                        // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                        let then;
-                        // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                        if (typeof (then = fulfilled.then) === 'function') {                         
-
-                            then.bind(fulfilled)(resolve, reject);
-                        } else {
-                            resolve(fulfilled);
-                        }
-                    } else {
-                        resolve(fulfilled)
-                    }   
+                    // if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
+                    //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                    //     let then;
+                    //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
+                    //     if (typeof (then = fulfilled.then) === 'function') {   // console.log('fulfilled .then');
+                    //         then.bind(fulfilled)(resolve, reject);
+                    //     } else {
+                    //         resolve(fulfilled);
+                    //     }
+                    // } else {
+                    //     resolve(fulfilled)
+                    // }   
+                    resolve(fulfilled);
                 } catch (error) {
                     reject(error, true);
                 }
@@ -274,19 +336,20 @@ module.exports = class MyPromise {
                         }
 
                         // check if callback returned MyPromise 
-                        if (rejected && (typeof rejected === 'object' || typeof rejected === 'function')) { 
-                            // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                            let then;
-                            // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                            if (typeof (then = rejected.then) === 'function') {    
-                                then.bind(rejected)(resolve, reject);
-                            } else {
-                                resolve(rejected);
-                            }
+                        // if (rejected && (typeof rejected === 'object' || typeof rejected === 'function')) { 
+                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
+                        //     let then;
+                        //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
+                        //     if (typeof (then = rejected.then) === 'function') {    
+                        //         then.bind(rejected)(resolve, reject);
+                        //     } else {
+                        //         resolve(rejected);
+                        //     }
                             
-                        } else {
-                            resolve(rejected);
-                        } 
+                        // } else {
+                        //     resolve(rejected);
+                        // } 
+                        resolve(rejected);
                     } catch (error) {
                         reject(error, true);
                     }    
