@@ -1,195 +1,153 @@
 module.exports = class MyPromise {
-    // state of MyPromise: pending, fulfilled or rejected
+    // 2.1 the states of MyPromise: pending, fulfilled, or rejected
     #state;
-    // given value for fullfill or reject functions
+    // a MyPromise’s eventual value/reason
     #value;
-    // array for fullfilled handler functions
-    #onFullfilledHandlers;
-    // array for rejected handler functions
+    // an array for fulfilled handler functions
+    #onFulfilledHandlers;
+    // an array for rejected handler functions
     #onRejectedHandlers;
-    // reserved field for internal tracking of the MyPromise resolution
-    #isCalled;
-    #isBusy;
+  
     /**
-   * @param {Function} func - Handler function with 2 prepared callbacks: `resolve` and `reject`  
-   * `resolve`- resolved with given value
-   * 
-   * `reject`- rejected with given value
-   * 
-   * @example
-   * 
-   * const promise = new MyPromise((resolve, reject) => {
-   *    setTimeout(() => resolve('resolved!'), 1000);
-   *    // setTimeout(() => reject('rejected!'), 1000);
-   * })
-   * @return {MyPromise}
-   */
-    constructor(func) {
-        this.#state = 'pending';
-        this.#onFullfilledHandlers = [];
-        this.#onRejectedHandlers = [];
-        this.#isCalled = false;
-        this.#isBusy = false;
-        
-        try {
-            this.#resolve(func, this.#fulfill.bind(this), this.#reject.bind(this));    
-        } catch (error) {
-            this.#reject(error);
-        }
-    }
-
-    #resolver(x) {
-        return new MyPromise((resolve, reject) => {
-            if (x && (typeof x === 'object' || typeof x === 'function')) { 
-                try { 
-                    let then;
-    
-                    if (typeof (then = x.then) === 'function') {
-                        // this.#isCalled = true; 
-                       //console.log(this.#isBusy)
-                        // if (this.#isBusy) return;
-    
-                        //this.#isBusy = true;
-                        // console.log('resolver calls bind.then')
-                        
-                        then.bind(x)((y) => {
-                            // console.log('bind value', y);
-                            const resolvedValue = this.#resolver.call(this, y);
-                            resolve(resolvedValue);
-                        }, (r) => {
-                           reject(r);                            
-                        });
-    
-                    //    console.log('value after bind.then')
-                        // return this.#resolver.call(this, resolved);
-                    } else {
-                        resolve(x);
-                    }              
-                } catch (error) { //console.log("#fulfill throws error")
-                    reject(error);
-                    return;
-                }          
-            } else {
-                resolve(x);
-            }
-        })
-       
-    }
-
-     /**
-     * Fulfill with passed value 
-     *
-     * @param {MyPromise|Any} value
-     * @return {void}
-     */
-    #fulfill(value) { 
-        if (this.#isCalled) return;        
-
-        if (this === value) {
-            this.#reject(new TypeError('Promise and x refer to the same object.'))
-            return;
-        }
-
-        if (value && (typeof value === 'object' || typeof value === 'function')) { 
-            let isBusy = false; 
-            try { 
-               
-                let then;
-
-                if (typeof (then = value.then) === 'function') {     
-                    then.bind(value)((x) => { 
-                        if (isBusy) return;
-                        isBusy = true;
-
-                        this.#fulfill.call(this, x);
-                    }, (r) => {
-                        if (isBusy) return;
-                        isBusy = true;
-
-                        this.#reject.call(this, r)
-                    }                    
-                    );
-                  
-                    return;
-                }              
-            } catch (error) {
-                if (isBusy) return;
-                this.#reject(error);
-                return;
-            }          
-        } 
-      
-
-        this.#value = value;   
-        this.#state = 'fulfilled'; 
-        this.#isCalled = true;
-        // setTimeout(() => {
-        //     this.#onFullfilledHandlers.forEach((fn) => fn());
-        // }, 0);
-       // console.log('start calbacks')
-        this.#onFullfilledHandlers.forEach((fn) => setTimeout(() => fn(), 0));       
-    }
-
-    /**
-     * Reject with passed error 
-     *
-     * @param {MyPromise|Any} error
-     * @param {Boolean} isThrown - Special internal call status tracking when a onFulfilled/onRejected throws a thenable (See then method 2.2.7.2)
-     * @return {void} 
-     */
-    #reject(error, isThrown = false) {   //console.log('reject', error, this.#isCalled);
-        if (this.#isCalled) return;
-
-        // if (!isThrown && error && (typeof error === 'object'  || typeof error === 'function')) { 
-        //     try {
-        //         let then;
-
-        //         if (typeof (then = error.then) === 'function') {
-        //             then.bind(error)(this.#fulfill.bind(this), this.#reject.bind(this))
-        //             return;
-        //         }            
-                
-        //     } catch (err) {
-        //         this.#reject(err);
-        //         return;
-        //     } 
-        // } 
-
-        this.#value = error;   
-        this.#state = 'rejected';
-        this.#isCalled = true;
-        //console.log('reject value', this.#value);
-        // setTimeout(() => {
-        //     this.#onRejectedHandlers.forEach((fn) => fn());            
-        // }, 0);
-      
-       this.#onRejectedHandlers.forEach((fn) => setTimeout(() => fn(), 0));
-       
-       // this.#onRejectedHandlers = null;
-    }
-
-    /**
-     * Resolve given handler 
-     *
-     * @param {MyPromise|Any} value
-     * @return {void}
-     */
-    #resolve(fn, onFulfilled, onRejected) {
-        if (this.#state === 'pending') {
-            fn(onFulfilled, onRejected); 
-        }
-    }
-
-    /**
-     * If the passed argument is a function, it is called asynchronously when `MyPromise` is resolved.
+     * @param {Function} func - A handler function with 2 prepared callbacks: `resolve` and `reject`  
      * 
-     * Subscribe to given `MyPromise`
+     * `resolve`- resolves with a given value
+     * 
+     * `reject`- rejects with a given reason
+     * 
+     * @example
+     * 
+     * const promise = new MyPromise((resolve, reject) => {
+     *    setTimeout(() => resolve('resolved!'), 1000);
+     *    // setTimeout(() => reject('rejected!'), 1000);
+     * })
+     * @return {MyPromise}
+     */
+    constructor(func) {
+      this.#state = 'pending';
+      this.#onFulfilledHandlers = [];
+      this.#onRejectedHandlers = [];
+  
+      try {
+        this.#resolve(func, this.#fulfill.bind(this), this.#reject.bind(this));
+      } catch (error) {
+        this.#reject(error);
+      }
+    }
+  
+    // 2.3
+    #handleResolution(promise, x, resolve, reject) { 
+      // 2.3.1
+      if (promise === x) {
+        reject(new TypeError('Chaining cycle detected for promise'));
+        return;
+      }
+  
+      if (x && (typeof x === 'object' || typeof x === 'function')) {
+        let thenCalled = false;
+  
+        try {
+          // 2.3.3.1
+          const then = x.then;
+  
+          // 2.3.3.3
+          if (typeof then === 'function') {
+            then.call(
+              x,
+              (y) => {
+                // 2.3.3.3.3
+                if (thenCalled) return;
+                thenCalled = true;
+                // 2.3.3.3.1
+                this.#handleResolution(promise, y, resolve, reject);
+              },
+              (r) => {
+                // 2.3.3.3.3
+                if (thenCalled) return;
+                thenCalled = true;
+                // 2.3.3.3.2
+                reject(r);
+              }
+            );
+            return;
+          }
+         // 2.3.3.2, 2.3.3.3.4
+        } catch (error) {
+          // 2.3.3.3.4.1
+          if (thenCalled) return;
+          // for an async resolvePromise/rejectPromise invocation
+          thenCalled = true;
+          // 2.3.3.3.4.2
+          reject(error);
+
+          return;
+        }
+      }
+  
+      resolve(x);
+    }
+  
+    #fulfill(value) {
+      // 2.1.2, 2.1.3
+      if (this.#state !== 'pending') return;
+
+      this.#value = value;
+      this.#state = 'fulfilled';
+      
+      // 2.2.4
+      setTimeout(() => {
+        // 2.2.6.1
+        this.#onFulfilledHandlers.forEach((fn) => fn());
+      }, 0);
+    }
+  
+    #reject(reason) {
+      // 2.1.2, 2.1.3
+      if (this.#state !== 'pending') return;
+      
+      this.#value = reason;
+      this.#state = 'rejected';
+      
+      // 2.2.4
+      setTimeout(() => {
+        // 2.2.6.2
+        this.#onRejectedHandlers.forEach((fn) => fn());
+      }, 0);
+    }
+   
+    #resolve(fn, onFulfilled, onRejected) {
+      fn(
+        (value) => {
+          this.#handleResolution(this, value, onFulfilled, onRejected)
+        },
+        (reason) => {
+          onRejected(reason);
+        }
+    );
+  }
+  
+    #callCallback(value, callback, resolve, reject) {
+      try {     
+        // 2.2.5           
+        const result = callback(value);
+        // 2.2.7.1
+        resolve(result);
+      } catch (error) {
+        // 2.2.7.2
+        reject(error);
+      }
+    }
+  
+    /**
+     * If the passed argument is a function, it will be called asynchronously when the current `MyPromise` is settled.
+     * 
+     * Subscribe to given `MyPromise` instance
      * and register 2 callbacks:
      * `onFulfilled` and `onRejected`
      * 
-     * `onFulfilled(value)` takes fullfilled value as parameter from subcribed `MyPromise`
+     * `onFulfilled(value)` takes the fulfilled value as a parameter from subscribed `MyPromise`.  Its return value becomes the fulfillment value of the promise returned by `then()`.
      * 
-     * `onRejected(value)` takes rejected value as parameter from subcribed `MyPromise`
+     * `onRejected(reason)` takes the rejected reason as a parameter from subscribed `MyPromise`.  Its return value becomes the fulfillment value of the promise returned by `then()`.
      * 
      * It immediately returns an equivalent `MyPromise` object, allowing you to chain
      * calls to other `MyPromise` methods. This new promise is always pending when returned, regardless of the current promise's status.
@@ -198,178 +156,59 @@ module.exports = class MyPromise {
      * 
      * then(onFulfilled)
      * then(onFulfilled, onRejected)
+     * then(undefined, onRejected)
+     * then(undefined, undefined)
      *
      * then(
-     * (value) =>  { fulfillment handler },
-     * (reason) => { rejection handler },
+     *  (value) => { fulfillment handler },
+     *  (reason) => { rejection handler },
      * )
      * @param {Function | Any} onFulfilled
      * @param {Function | Any} onRejected
      * @return {MyPromise}
      */
-    then(onFulfilled, onRejected) {     
-        const p = new MyPromise((resolve, reject) => {      
-            if (this.#state === "pending") {
-                // register promise callback(s) if promise execute asynchronous
-                this.#onFullfilledHandlers.push(() => {     //console.log('push');
-                    try {
-                        if (typeof onFulfilled !== 'function') {
-                            resolve(this.#value);
-
-                            return;
-                        }
-
-                        const fulfilled = onFulfilled(this.#value);
-                       
-
-                        // check if callback returned MyPromise (like p.then((res) => new MyPromise(...)))
-                        // if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
-                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                        //     /*
-                        //     Example:
-                        //     returned internal result of MyPromise back to .then() method to support future chaining
-
-                        //     p.then((result) => {return new MyPromise((res, rej) => setTimeout(() => res(result), 1000))})
-                        //     */
-                          
-                        //     let then;
-                        // // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                        // if (typeof (then = fulfilled.then) === 'function') {                                      
-
-                        //     then.bind(fulfilled)(resolve, reject);
-                        // } else {
-                        //     resolve(fulfilled);
-                        // }
-                        // } else {
-                        //     resolve(fulfilled);
-                        // }  
-                        resolve(fulfilled);                          
-                    } catch (error) {                        
-                        reject(error, true);
-                    }     
-                })
-                this.#onRejectedHandlers.push(() => {  
-                    try {
-                        if (typeof onRejected !== 'function') {
-                            reject(this.#value);
-
-                            return;
-                        } 
-
-                        const rejected = onRejected(this.#value);
-
-                        // if (!this.#isCalled) {
-                        //     rejected = onRejected(this.#value);
-                        // } Test this with .catch()
-
-                        // check if callback returned MyPromise 
-                       
-                        // if (rejected && (typeof rejected === 'object'  || typeof rejected === 'function')) { 
-                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                        //     let then;
-                        //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                        //     if (typeof (then = rejected.then) === 'function') {                                      
-    
-                        //         then.bind(rejected)(resolve, reject);
-                        //     } else {
-                        //         resolve(rejected);
-                        //     }
-                        // } else {
-                        //     resolve(rejected, true);
-                        // }        
-                        resolve(rejected);                   
-                    } catch (error) {
-                        reject(error, true);
-                    }
-                })
-            }
-
-            if (this.#state === "fulfilled") {  
-               setTimeout(() => {
-                try {
-                    if (typeof onFulfilled !== 'function') {
-                        resolve(this.#value);
-
-                        return;
-                    }
-
-                    // execute promise callback if promise already fulfilled
-                    const fulfilled = onFulfilled(this.#value);
-                   
-                    if (p === fulfilled) {
-                        throw new TypeError('Promise and x refer to the same object.');
-                    }
-               
-                    // check if callback returned MyPromise 
-                    // if (fulfilled && (typeof fulfilled === 'object' || typeof fulfilled === 'function')) { 
-                    //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                    //     let then;
-                    //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                    //     if (typeof (then = fulfilled.then) === 'function') {   // console.log('fulfilled .then');
-                    //         then.bind(fulfilled)(resolve, reject);
-                    //     } else {
-                    //         resolve(fulfilled);
-                    //     }
-                    // } else {
-                    //     resolve(fulfilled)
-                    // }   
-                    resolve(fulfilled);
-                } catch (error) {
-                    reject(error, true);
-                }
-               }, 0)                
-            }
-
-            if (this.#state === "rejected") { 
-                setTimeout(() => {
-                    try {
-                        if (typeof onRejected !== 'function') {
-                            reject(this.#value);
-                            
-                            return;
-                        } 
-                        // execute promise callback if promise already rejected
-                        const rejected = onRejected(this.#value);
-
-                        if (p === rejected) {
-                            throw new TypeError('Promise and x refer to the same object.');
-                        }
-
-                        // check if callback returned MyPromise 
-                        // if (rejected && (typeof rejected === 'object' || typeof rejected === 'function')) { 
-                        //     // chain internal promise (returned inside .then()) with .then() promise to return result back to .then() promise
-                        //     let then;
-                        //     // Do not increase internal counter (https://github.com/promises-aplus/promises-tests/blob/4786505fcb0cafabc5f5ce087e1df86358de2da6/lib/tests/2.3.3.js#L135C28-L135C61)
-                        //     if (typeof (then = rejected.then) === 'function') {    
-                        //         then.bind(rejected)(resolve, reject);
-                        //     } else {
-                        //         resolve(rejected);
-                        //     }
-                            
-                        // } else {
-                        //     resolve(rejected);
-                        // } 
-                        resolve(rejected);
-                    } catch (error) {
-                        reject(error, true);
-                    }    
-                }, 0)
-            }    
-        })
-
-        return p;
+    // 2.2
+    then(onFulfilled, onRejected) {
+      // 2.2.1.1, 2.2.7.3
+      onFulfilled = typeof onFulfilled === 'function' ? onFulfilled : (x) => x;
+      // 2.2.1.2, 2.2.7.4
+      onRejected = typeof onRejected === 'function' ? onRejected : (r) => {throw r};
+      // 2.2.7
+      return new MyPromise((resolve, reject) => {
+        if (this.#state === 'pending') {
+          // 2.2.2
+          this.#onFulfilledHandlers.push(() => {
+              this.#callCallback(this.#value, onFulfilled, resolve, reject);
+          });
+          // 2.2.3
+          this.#onRejectedHandlers.push(() => {
+            this.#callCallback(this.#value, onRejected, resolve, reject);
+          });
+        }
+  
+        if (this.#state === 'fulfilled') {
+          // 2.2.4
+          setTimeout(() => {
+            this.#callCallback(this.#value, onFulfilled, resolve, reject);
+          }, 0);
+        }
+        
+        if (this.#state === 'rejected') {
+          // 2.2.4
+          setTimeout(() => {
+            this.#callCallback(this.#value, onRejected, resolve, reject);
+          }, 0);
+        }
+      });
     }
-
+  
     /**
-     * Syntatic sugar for .then(null, reject)
+     * Syntactic sugar for .then(undefined, reject)
      * 
      * @param {Function} onRejected
      * @returns {MyPromise} 
      */
     catch(onRejected) {
-        if (!this.#isCalled && this.#state !== 'fulfilled') {
-            return this.then(null, onRejected);
-        }
-        return new MyPromise(() => {});
+      return this.then(undefined, onRejected);
     }
-}    
+  };

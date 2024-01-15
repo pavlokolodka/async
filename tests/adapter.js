@@ -13,18 +13,6 @@ module.exports = {
         };
     }
 };
-// module.exports = {
-//     deferred: function() {
-//         let resolve, reject;
-//         return {
-//             promise: new Promise((res, rej) => {
-//                 resolve = res;
-//                 reject = rej;
-//             }),
-//             resolve: resolve,
-//             reject: reject
-//         };
-//     }
-// };
+
 require('process').on('unhandledRejection', (err) => console.debug)
-// 790/82
+// 872
